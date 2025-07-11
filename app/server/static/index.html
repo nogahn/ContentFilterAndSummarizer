@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>URL Processing Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+
+        h1,
+        h2 {
+            color: #0056b3;
+        }
+
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            max-width: 1000px;
+            margin: auto;
+        }
+
+        .input-group {
+            display: flex;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        #output {
+            margin-top: 20px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+
+        .url-status {
+            background-color: #e9ecef;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+        }
+
+        .status-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 1.1em;
+        }
+
+        .status-detail {
+            font-size: 0.9em;
+            color: #555;
+            margin-bottom: 3px;
+        }
+
+        .log-entry {
+            font-family: monospace;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 3px;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .log-entry.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .log-entry.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .log-entry.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .websocket-log {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .submission-response {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-family: monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .status-completed {
+            border-left-color: #28a745;
+        }
+
+        .status-failed {
+            border-left-color: #dc3545;
+        }
+
+        .status-queued {
+            border-left-color: #ffc107;
+        }
+
+        .status-cached {
+            border-left-color: #17a2b8;
+        }
+
+        .example-urls {
+            margin-top: 10px;
+        }
+
+        .example-urls button {
+            font-size: 0.8em;
+            padding: 5px 10px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .example-urls button:hover {
+            background-color: #545b62;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>URL Processing System</h1>
+        <p>Submit URLs for content analysis and summarization. The system will process each URL and provide real-time
+            updates via WebSocket.</p>
+
+        <div class="input-group">
+            <input type="text" id="urlInput"
+                placeholder="Enter URL (e.g., https://www.nature.com/articles/s41586-025-09341-z)" />
+            <button id="submitBtn" onclick="submitUrl()">Submit URL</button>
+        </div>
+
+        <div class="example-urls">
+            <strong>Example URLs:</strong><br />
+            <button onclick="setExampleUrl('https://www.bbc.com/')">bbc</button>
+            <button onclick="setExampleUrl('https://www.nature.com')">nature</button>
+            <button onclick="setExampleUrl('https://edition.cnn.com')">cnn</button>
+        </div>
+
+        <div id="output">
+            <h2>Submission Response:</h2>
+            <div id="submissionResponse" class="submission-response">No URLs submitted yet.</div>
+
+            <h2>Live Status Updates:</h2>
+            <div id="liveStatusUpdates">
+                <p>No URLs submitted yet.</p>
+            </div>
+
+            <h2>Content</h2>
+            <div id="fullContent"
+                style="display:none; background-color:#fff; border:1px solid #ddd; padding:15px; margin-top:15px; border-radius:6px; max-height:300px; overflow-y:auto; font-family: 'Georgia', serif; font-size: 0.95em; color: #222;">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const urlInput = document.getElementById('urlInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const submissionResponseElem = document.getElementById('submissionResponse');
+        const liveStatusUpdatesElem = document.getElementById('liveStatusUpdates');
+        const webSocketConnections = {};
+
+        function setExampleUrl(url) {
+            urlInput.value = url;
+        }
+
+        function setLoading(isLoading) {
+            submitBtn.disabled = isLoading;
+            submitBtn.textContent = isLoading ? 'Processing...' : 'Submit URL';
+        }
+
+        function displayResultWithContent(url, result, containerForResult) {
+            try {
+                let html = `<h3>Summary:</h3><p>${result.summary || "No summary available."}</p>`;
+                if (result.keywords) {
+                    const keywordsFormatted = result.keywords
+                        .split('\n')
+                        .map(kw => `<li>${kw.trim()}</li>`)
+                        .join('');
+                    html += `<h3>Keywords:</h3><ul>${keywordsFormatted}</ul>`;
+                }
+                html += `<h3>Sentiment:</h3><p>${result.sentiment || "N/A"}</p>`;
+                html += `<h3>Overall Score:</h3><p>${result.overall_score ?? "N/A"}</p>`;
+                containerForResult.innerHTML = html;
+                containerForResult.style.backgroundColor = '#e6ffe6';
+                setTimeout(() => {
+                    containerForResult.style.backgroundColor = '';
+                }, 1000);
+            } catch (e) {
+                console.error("Failed to show result:", e);
+            }
+            fetch(`/api/content?url=${encodeURIComponent(url)}`)
+                .then(res => res.json())
+                .then(data => {
+                    const contentDiv = document.getElementById('fullContent');
+                    contentDiv.textContent = data.content || 'No content available';
+                    contentDiv.style.display = 'block';
+                })
+
+                .catch(err => console.error('Failed to fetch full content:', err));
+        }
+
+        async function submitUrl() {
+            const url = urlInput.value.trim();
+            if (!url) {
+                alert("Please enter a URL.");
+                return;
+            }
+            setLoading(true);
+            submissionResponseElem.textContent = 'Submitting...';
+            liveStatusUpdatesElem.innerHTML = '<p>Initializing...</p>';
+
+            const contentDiv = document.getElementById('fullContent');
+            if (contentDiv) {
+                contentDiv.textContent = '';
+                contentDiv.style.display = 'none';
+            }
+            for (const reqId in webSocketConnections) {
+                if (webSocketConnections[reqId].readyState === WebSocket.OPEN) {
+                    webSocketConnections[reqId].close();
+                }
+            }
+            Object.keys(webSocketConnections).forEach(key => delete webSocketConnections[key]);
+
+            try {
+                const response = await fetch('/api/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ urls: [url] }),
+                });
+
+                const data = await response.json();
+
+                submissionResponseElem.textContent = "Waiting for processing results...";
+
+                if (response.ok && data.statuses && data.statuses.length > 0) {
+                    liveStatusUpdatesElem.innerHTML = '';
+                    data.statuses.forEach(urlStatus => {
+                        const urlSpecificRequestId = urlStatus.request_id;
+                        const urlToTrack = urlStatus.url;
+
+                        const urlStatusDiv = document.createElement('div');
+                        urlStatusDiv.className = `url-status status-${urlStatus.status}`;
+                        urlStatusDiv.id = `status-${urlSpecificRequestId}`;
+
+                        const resultDisplay = urlStatus.result ?
+                            `<details><summary>View Result</summary><pre>${JSON.stringify(urlStatus.result, null, 2)}</pre></details>` :
+                            'Awaiting...';
+
+                        urlStatusDiv.innerHTML = `
+                            <div class="status-header">URL: ${urlToTrack}</div>
+                            <div class="status-detail"><strong>Request ID:</strong> ${urlSpecificRequestId}</div>
+                            <div class="status-detail"><strong>Initial Status:</strong> ${urlStatus.status} - ${urlStatus.detail || 'N/A'}</div>
+                            <div class="status-detail"><strong>LLM Result:</strong> <span id="result-${urlSpecificRequestId}">${resultDisplay}</span></div>
+                            <h4>WebSocket Log:</h4>
+                            <div class="websocket-log" id="log-${urlSpecificRequestId}"></div>
+                        `;
+                        liveStatusUpdatesElem.appendChild(urlStatusDiv);
+
+                        if (urlStatus.status === 'cached' && urlStatus.result) {
+                            displayResultWithContent(
+                                urlStatus.url,
+                                urlStatus.result,
+                                submissionResponseElem,
+                            );
+                        }
+                        if (urlStatus.status !== 'rejected') {
+                            connectWebSocket(urlSpecificRequestId, urlToTrack);
+                        }
+                    });
+                } else {
+                    let errorMsg = 'Unknown error';
+                    if (Array.isArray(data.detail)) {
+                        errorMsg = data.detail.map(err => err.msg).join('; ');
+                    } else if (typeof data.detail === 'string') {
+                        errorMsg = data.detail;
+                    }
+                    submissionResponseElem.textContent = `Submission failed: ${errorMsg}`;
+                    liveStatusUpdatesElem.innerHTML = `<p style="color: red;">Error: ${errorMsg}</p>`;
+                }
+
+            } catch (error) {
+                console.error("Error submitting URL:", error);
+                submissionResponseElem.textContent = `Error: ${error.message}`;
+                liveStatusUpdatesElem.innerHTML = `<p style="color: red;">Failed to connect to server: ${error.message}</p>`;
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        function connectWebSocket(requestId, url) {
+            const ws = new WebSocket(`ws://${window.location.host}/ws/${requestId}`);
+            webSocketConnections[requestId] = ws;
+
+            const logElem = document.getElementById(`log-${requestId}`);
+            const statusDiv = document.getElementById(`status-${requestId}`);
+            const resultSpan = document.getElementById(`result-${requestId}`);
+
+            function addLogEntry(message, type = 'info') {
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry ${type}`;
+                logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                logElem.appendChild(logEntry);
+                logElem.scrollTop = logElem.scrollHeight;
+            }
+
+            ws.onopen = () => {
+                addLogEntry(`WebSocket connected for ${url}`, 'success');
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                let logMessage = `Status: ${message.status}`;
+
+                if (message.detail) {
+                    logMessage += ` - ${message.detail}`;
+                }
+
+                if (message.result) {
+                    const result = message.result;
+                    logMessage += ` | Score: ${result.overall_score || 'N/A'}`;
+                    if (result.extracted_keywords) {
+                        logMessage += ` | Keywords: ${result.extracted_keywords.slice(0, 3).join(', ')}${result.extracted_keywords.length > 3 ? '...' : ''}`;
+                    }
+                    if (result.summary) {
+                        logMessage += ` | Summary: ${result.summary.substring(0, 100)}...`;
+                    }
+
+                    resultSpan.innerHTML = `<details><summary>View Result</summary><pre>${JSON.stringify(result, null, 2)}</pre></details>`;
+                    statusDiv.className = `url-status status-${message.status}`;
+
+                    displayResultWithContent(
+                        message.url,
+                        message.result,
+                        submissionResponseElem
+                    );
+                }
+
+                const logType = message.status === 'failed' ? 'error' :
+                    message.status === 'completed' ? 'success' : 'info';
+
+                addLogEntry(logMessage, logType);
+
+                const statusDetails = statusDiv.querySelectorAll('.status-detail');
+                if (statusDetails.length >= 3) {
+                    statusDetails[2].innerHTML = `<strong>Current Status:</strong> ${message.status} - ${message.detail || 'N/A'}`;
+                }
+            };
+
+            ws.onclose = (event) => {
+                const reason = event.reason || 'Connection closed';
+                addLogEntry(`WebSocket closed (Code: ${event.code}, Reason: ${reason})`, 'info');
+            };
+
+            ws.onerror = (error) => {
+                addLogEntry(`WebSocket error: ${error.message || 'Connection error'}`, 'error');
+            };
+        }
+
+        urlInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                submitUrl();
+            }
+        });
+    </script>
+</body>
+
+</html>

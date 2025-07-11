@@ -1,0 +1,93 @@
+version: '3.8'
+
+x-common-environment: &common-environment
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USER: ${RABBITMQ_USER}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  LLM_PROVIDER: ${LLM_PROVIDER}
+  LLM_MODEL_NAME: ${LLM_MODEL_NAME}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS}
+  GROQ_API_KEY: ${GROQ_API_KEY}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+  PROCESSOR_PREFETCH_COUNT: ${PROCESSOR_PREFETCH_COUNT}
+  EVALUATOR_PREFETCH_COUNT: ${EVALUATOR_PREFETCH_COUNT}
+  WEBSOCKET_CONSUMER_PREFETCH_COUNT: ${WEBSOCKET_CONSUMER_PREFETCH_COUNT}
+  EVALUATOR_SCORE_THRESHOLD: ${EVALUATOR_SCORE_THRESHOLD}
+  MAX_RETRIES_URL_TASK: ${MAX_RETRIES_URL_TASK}
+  MAX_RETRIES_EVALUATION_TASK: ${MAX_RETRIES_EVALUATION_TASK}
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  redis:
+    image: redis:8-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  server:
+    image: ${APP_IMAGE}
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *common-environment
+    command: python -m app.server.main
+    depends_on:
+      - rabbitmq
+      - redis
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  processor:
+    image: ${APP_IMAGE}
+    environment:
+      <<: *common-environment
+    command: python -m app.llm_workers.processor.consumer
+    depends_on:
+      - rabbitmq
+      - redis
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  evaluator:
+    image: ${APP_IMAGE}
+    environment:
+      <<: *common-environment
+    command: python -m app.llm_workers.evaluator.consumer
+    depends_on:
+      - rabbitmq
+      - redis
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+volumes:
+  rabbitmq_data:
+  redis_data:
